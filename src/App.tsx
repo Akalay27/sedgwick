@@ -653,6 +653,10 @@ function App() {
             <p className="text-gray-600 text-sm mb-4">
               Made for CMS Letter Processing
             </p>
+            <p className="text-sm text-gray-700 mb-4">
+              This app runs completely on your device. All files stay on your
+              computer and are never uploaded or shared anywhere.
+            </p>
             <button
               onClick={() => setShowGettingStarted(true)}
               className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:border-gray-400 hover:bg-gray-50 transition-all text-sm font-medium"
