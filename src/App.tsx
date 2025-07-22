@@ -122,13 +122,29 @@ function App() {
 
     for (const sheetName of workbook.SheetNames) {
       const sheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as string[][];
+      const data = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+      }) as unknown[][];
 
       if (data.length < 2) continue;
 
-      const headers = data[0];
+      // Convert headers to strings for reliable comparison
+      const headers = data[0].map((header: unknown) =>
+        String(header || "").trim()
+      );
       const dateIdx = headers.indexOf(settings.dateCol);
       const xmlIdIdx = headers.indexOf(settings.xmlIdCol);
+
+      if (settings.verbose) {
+        log(
+          `Sheet '${sheetName}' headers: ${headers.slice(0, 10).join(", ")}${
+            headers.length > 10 ? "..." : ""
+          }`
+        );
+        log(
+          `Looking for '${settings.dateCol}' (found at index ${dateIdx}) and '${settings.xmlIdCol}' (found at index ${xmlIdIdx})`
+        );
+      }
 
       if (dateIdx === -1 || xmlIdIdx === -1) {
         log(
@@ -154,6 +170,12 @@ function App() {
           mapping.set(dateStr, String(xmlId).trim());
         }
       }
+
+      log(
+        `Sheet '${sheetName}' processed: ${data.length - 1} rows, found ${
+          Array.from(mapping.keys()).length
+        } valid mappings so far`
+      );
     }
 
     return mapping;
@@ -226,9 +248,9 @@ function App() {
         log(`Error: No mapping provided for '${base}'`);
         return { images: [], xmlId: "" };
       }
-      
+
       const mappedId = dateMap.get(base);
-      
+
       if (settings.verbose) {
         log(`Processing '${base}', looking for XML ID...`);
       }
@@ -351,11 +373,14 @@ function App() {
   };
 
   const startProcessing = async () => {
-    if (!settings.useExistingNames && (!selectedFiles.spreadsheet || selectedFiles.pdfs.length === 0)) {
+    if (
+      !settings.useExistingNames &&
+      (!selectedFiles.spreadsheet || selectedFiles.pdfs.length === 0)
+    ) {
       log("Please select both spreadsheet and PDF files");
       return;
     }
-    
+
     if (settings.useExistingNames && selectedFiles.pdfs.length === 0) {
       log("Please select PDF files to process");
       return;
@@ -373,7 +398,7 @@ function App() {
 
     try {
       let dateMap: Map<string, string> | undefined;
-      
+
       if (!settings.useExistingNames) {
         log("Reading mapping from spreadsheet...");
         dateMap = await buildDateToXmlMap(selectedFiles.spreadsheet!);
@@ -393,7 +418,9 @@ function App() {
           );
         }
       } else {
-        log("Using existing PDF filenames as XML IDs (no spreadsheet mapping needed)");
+        log(
+          "Using existing PDF filenames as XML IDs (no spreadsheet mapping needed)"
+        );
         if (settings.verbose) {
           log(
             `PDF names to process: ${selectedFiles.pdfs
@@ -420,7 +447,11 @@ function App() {
           files.map(async (file) => {
             const result = await processPDF(file, dateMap);
             if (result.images.length > 0 && result.xmlId) {
-              return { fileName: file.name, xmlId: result.xmlId, images: result.images };
+              return {
+                fileName: file.name,
+                xmlId: result.xmlId,
+                images: result.images,
+              };
             }
             return null;
           })
@@ -478,9 +509,13 @@ function App() {
         log("Export complete!");
       } else {
         if (settings.useExistingNames) {
-          log("No files were successfully processed - check PDF files and settings");
+          log(
+            "No files were successfully processed - check PDF files and settings"
+          );
         } else {
-          log("No files were successfully processed - check that PDF filenames match the spreadsheet entries");
+          log(
+            "No files were successfully processed - check that PDF filenames match the spreadsheet entries"
+          );
         }
       }
 
@@ -672,8 +707,9 @@ function App() {
             {settings.useExistingNames && (
               <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
                 <p className="text-sm text-gray-700">
-                  <strong>Using existing PDF filenames:</strong> No spreadsheet needed. 
-                  PDFs will be processed using their filename (without .pdf) as the XML ID.
+                  <strong>Using existing PDF filenames:</strong> No spreadsheet
+                  needed. PDFs will be processed using their filename (without
+                  .pdf) as the XML ID.
                 </p>
               </div>
             )}
@@ -723,10 +759,17 @@ function App() {
 
         {processingState.logs.length > 0 && (
           <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <h3 className="text-lg font-medium mb-4 text-gray-900">Processing Log</h3>
+            <h3 className="text-lg font-medium mb-4 text-gray-900">
+              Processing Log
+            </h3>
             <div className="border border-gray-200 rounded-md p-4 max-h-64 overflow-y-auto bg-gray-50">
               {processingState.logs.map((log, idx) => (
-                <div key={idx} className="text-sm text-gray-700 font-mono py-0.5">{log}</div>
+                <div
+                  key={idx}
+                  className="text-sm text-gray-700 font-mono py-0.5"
+                >
+                  {log}
+                </div>
               ))}
             </div>
           </div>
