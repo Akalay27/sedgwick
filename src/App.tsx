@@ -15,6 +15,14 @@ interface Settings {
   useExistingNames: boolean;
 }
 
+interface Toast {
+  id: string;
+  type: "error" | "warning" | "info";
+  title: string;
+  messages: string[];
+  timestamp: number;
+}
+
 interface ProcessingState {
   isProcessing: boolean;
   progress: number;
@@ -50,14 +58,114 @@ function App() {
     spreadsheet: null,
   });
 
-  const log = useCallback((message: string) => {
-    setProcessingState((prev) => ({
-      ...prev,
-      logs: [
-        ...prev.logs.slice(-99),
-        `${new Date().toLocaleTimeString()}: ${message}`,
-      ],
-    }));
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback(
+    (type: Toast["type"], title: string, message: string) => {
+      const toastId = Date.now().toString();
+      setToasts((prev) => {
+        // Check if we should group this toast with existing ones
+        if (type === "warning" && title === "Duplicate Entries") {
+          const existingToast = prev.find(
+            (t) => t.title === title && t.type === type
+          );
+          if (existingToast) {
+            return prev.map((t) =>
+              t.id === existingToast.id
+                ? {
+                    ...t,
+                    messages: [...t.messages, message],
+                    timestamp: Date.now(),
+                  }
+                : t
+            );
+          }
+        }
+
+        const newToast: Toast = {
+          id: toastId,
+          type,
+          title,
+          messages: [message],
+          timestamp: Date.now(),
+        };
+
+        return [...prev.slice(-4), newToast]; // Keep max 5 toasts
+      });
+
+      // Auto-dismiss after delay
+      setTimeout(
+        () => {
+          setToasts((prev) => prev.filter((t) => t.id !== toastId));
+        },
+        type === "error" ? 15000 : 12000
+      );
+    },
+    []
+  );
+
+  const log = useCallback(
+    (message: string, type: "info" | "warning" | "error" = "info") => {
+      // Handle different message types
+      if (message.includes("⚠️")) {
+        if (message.includes("Duplicate date")) {
+          const match = message.match(/Duplicate date '([^']+)'/);
+          const date = match ? match[1] : "unknown";
+          addToast(
+            "warning",
+            "Duplicate Entries",
+            `Date "${date}" appears multiple times`
+          );
+        } else if (message.includes("missing column")) {
+          const match = message.match(/Sheet '([^']+)'/);
+          const sheet = match ? match[1] : "unknown";
+          addToast(
+            "warning",
+            "Missing Columns",
+            `Sheet "${sheet}" missing required columns`
+          );
+        } else {
+          addToast("warning", "Warning", message.replace("⚠️ ", ""));
+        }
+      } else if (
+        message.includes("Error:") ||
+        message.includes("error") ||
+        type === "error"
+      ) {
+        addToast("error", "Processing Error", message.replace("Error: ", ""));
+      } else if (
+        message.includes("No XML ID") ||
+        message.includes("skipping")
+      ) {
+        addToast("warning", "Skipped Files", message);
+      } else if (
+        message.includes("Failed to") ||
+        message.includes("Could not")
+      ) {
+        addToast("error", "Processing Failed", message);
+      }
+
+      // Only add non-warning/error messages to the main log
+      if (
+        !message.includes("⚠️") &&
+        !message.includes("Error:") &&
+        type !== "error" &&
+        type !== "warning"
+      ) {
+        setProcessingState((prev) => ({
+          ...prev,
+          logs: [
+            ...prev.logs.slice(-99),
+            `${new Date().toLocaleTimeString()}: ${message}`,
+          ],
+        }));
+      }
+    },
+    [addToast]
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const selectPDFFolder = async () => {
@@ -256,7 +364,7 @@ function App() {
       }
 
       if (!mappedId) {
-        log(`No XML ID for '${base}', skipping`);
+        log(`No XML ID for '${base}', skipping`, "warning");
         return { images: [], xmlId: "" };
       }
 
@@ -301,7 +409,7 @@ function App() {
       log(`Converted '${base}' to ${images.length} images`);
       return { images, xmlId };
     } catch (error) {
-      log(`Error processing '${base}': ${error}`);
+      log(`Error processing '${base}': ${error}`, "error");
       return { images: [], xmlId };
     }
   };
@@ -368,7 +476,7 @@ function App() {
         log(`Downloaded zip with ${totalImages} images`);
       }
     } catch (err) {
-      log(`Export error: ${err}`);
+      log(`Export error: ${err}`, "error");
     }
   };
 
@@ -388,12 +496,16 @@ function App() {
 
     log(`Starting processing of ${selectedFiles.pdfs.length} PDF files...`);
 
+    // Clear existing toasts
+    setToasts([]);
+
     setProcessingState((prev) => ({
       ...prev,
       isProcessing: true,
       progress: 0,
       total: selectedFiles.pdfs.length,
       currentFile: "",
+      logs: [],
     }));
 
     try {
@@ -521,7 +633,7 @@ function App() {
 
       log("All done!");
     } catch (error) {
-      log(`Error: ${error}`);
+      log(`${error}`, "error");
       console.error("Processing error:", error);
     } finally {
       setProcessingState((prev) => ({
@@ -760,7 +872,7 @@ function App() {
         {processingState.logs.length > 0 && (
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <h3 className="text-lg font-medium mb-4 text-gray-900">
-              Processing Log
+              Processing Status
             </h3>
             <div className="border border-gray-200 rounded-md p-4 max-h-64 overflow-y-auto bg-gray-50">
               {processingState.logs.map((log, idx) => (
@@ -774,6 +886,74 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Toast Stack */}
+        <div className="fixed top-4 right-4 space-y-2 z-50 max-w-sm">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`bg-white border-l-4 rounded-md shadow-lg p-4 transition-all duration-300 ${
+                toast.type === "error"
+                  ? "border-red-500"
+                  : toast.type === "warning"
+                  ? "border-yellow-500"
+                  : "border-blue-500"
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center">
+                    <span
+                      className={`text-sm font-medium ${
+                        toast.type === "error"
+                          ? "text-red-800"
+                          : toast.type === "warning"
+                          ? "text-yellow-800"
+                          : "text-blue-800"
+                      }`}
+                    >
+                      {toast.type === "error"
+                        ? "⚠️"
+                        : toast.type === "warning"
+                        ? "⚠️"
+                        : "ℹ️"}{" "}
+                      {toast.title}
+                    </span>
+                  </div>
+                  <div className="mt-1">
+                    {toast.messages.length === 1 ? (
+                      <p className="text-sm text-gray-700">
+                        {toast.messages[0]}
+                      </p>
+                    ) : (
+                      <div className="text-sm text-gray-700">
+                        <p className="mb-1">{toast.messages.length} issues:</p>
+                        <ul className="list-disc list-inside space-y-0.5 max-h-20 overflow-y-auto">
+                          {toast.messages.slice(0, 5).map((msg, idx) => (
+                            <li key={idx} className="text-xs">
+                              {msg}
+                            </li>
+                          ))}
+                          {toast.messages.length > 5 && (
+                            <li className="text-xs text-gray-500">
+                              ...and {toast.messages.length - 5} more
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => dismissToast(toast.id)}
+                  className="ml-2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <span className="sr-only">Dismiss</span>✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
