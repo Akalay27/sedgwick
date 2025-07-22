@@ -60,6 +60,9 @@ function App() {
     spreadsheet: null,
   });
 
+  const [exportDirHandle, setExportDirHandle] =
+    useState<FileSystemDirectoryHandle | null>(null);
+
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showGettingStarted, setShowGettingStarted] = useState(false);
 
@@ -171,14 +174,24 @@ function App() {
       if ("showDirectoryPicker" in window) {
         const dirHandle = await (
           window as unknown as {
-            showDirectoryPicker: (options: any) => Promise<any>;
+            showDirectoryPicker: (
+              options?: unknown
+            ) => Promise<FileSystemDirectoryHandle>;
           }
         ).showDirectoryPicker({
           mode: "read",
         });
 
         const files: File[] = [];
-        for await (const [name, handle] of dirHandle) {
+        const entries = (
+          dirHandle as unknown as {
+            entries: () => AsyncIterableIterator<[
+              string,
+              FileSystemFileHandle | FileSystemDirectoryHandle
+            ]>;
+          }
+        ).entries();
+        for await (const [name, handle] of entries) {
           if (handle.kind === "file" && name.toLowerCase().endsWith(".pdf")) {
             files.push(await handle.getFile());
           }
@@ -413,18 +426,11 @@ function App() {
   };
 
   const exportResults = async (
-    results: Map<string, { xmlId: string; images: Blob[] }>
+    results: Map<string, { xmlId: string; images: Blob[] }>,
+    dirHandle?: FileSystemDirectoryHandle | null
   ) => {
     try {
-      if ("showDirectoryPicker" in window) {
-        const dirHandle = await (
-          window as unknown as {
-            showDirectoryPicker: (options: any) => Promise<any>;
-          }
-        ).showDirectoryPicker({
-          mode: "readwrite",
-        });
-
+      if (dirHandle) {
         const exportPromises: Promise<void>[] = [];
 
         for (const [, { xmlId, images }] of results) {
@@ -450,6 +456,17 @@ function App() {
             0
           )} images`
         );
+      } else if ("showDirectoryPicker" in window) {
+        const picked = await (
+          window as unknown as {
+            showDirectoryPicker: (
+              options?: unknown
+            ) => Promise<FileSystemDirectoryHandle>;
+          }
+        ).showDirectoryPicker({
+          mode: "readwrite",
+        });
+        await exportResults(results, picked);
       } else {
         const files: Record<string, Uint8Array> = {};
         let totalImages = 0;
@@ -496,6 +513,23 @@ function App() {
 
     // Clear existing toasts
     setToasts([]);
+
+    let dirHandle: FileSystemDirectoryHandle | null = exportDirHandle;
+    if ("showDirectoryPicker" in window && !dirHandle) {
+      try {
+        dirHandle = await (
+          window as unknown as {
+            showDirectoryPicker: (
+              options?: unknown
+            ) => Promise<FileSystemDirectoryHandle>;
+          }
+        ).showDirectoryPicker({ mode: "readwrite" });
+        setExportDirHandle(dirHandle);
+      } catch (err) {
+        log(`Export folder selection cancelled: ${err}`);
+        dirHandle = null;
+      }
+    }
 
     setProcessingState((prev) => ({
       ...prev,
@@ -615,7 +649,7 @@ function App() {
 
       if (results.size > 0) {
         log("Starting export...");
-        await exportResults(results);
+        await exportResults(results, dirHandle);
         log("Export complete!");
       } else {
         if (settings.useExistingNames) {
