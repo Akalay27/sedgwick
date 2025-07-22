@@ -60,8 +60,6 @@ function App() {
     spreadsheet: null,
   });
 
-  const [exportDirHandle, setExportDirHandle] =
-    useState<FileSystemDirectoryHandle | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showGettingStarted, setShowGettingStarted] = useState(false);
@@ -171,48 +169,18 @@ function App() {
 
   const selectPDFFolder = async () => {
     try {
-      if ("showDirectoryPicker" in window) {
-        const dirHandle = await (
-          window as unknown as {
-            showDirectoryPicker: (
-              options?: unknown
-            ) => Promise<FileSystemDirectoryHandle>;
-          }
-        ).showDirectoryPicker({
-          mode: "read",
-        });
-
-        const files: File[] = [];
-        const entries = (
-          dirHandle as unknown as {
-            entries: () => AsyncIterableIterator<[
-              string,
-              FileSystemFileHandle | FileSystemDirectoryHandle
-            ]>;
-          }
-        ).entries();
-        for await (const [name, handle] of entries) {
-          if (handle.kind === "file" && name.toLowerCase().endsWith(".pdf")) {
-            files.push(await handle.getFile());
-          }
-        }
-
+      const input = document.createElement("input");
+      input.type = "file";
+      input.webkitdirectory = true;
+      input.accept = ".pdf";
+      input.onchange = (e) => {
+        const files = Array.from(
+          (e.target as HTMLInputElement).files || []
+        ).filter((f) => f.name.toLowerCase().endsWith(".pdf"));
         setSelectedFiles((prev) => ({ ...prev, pdfs: files }));
         log(`Selected ${files.length} PDF files`);
-      } else {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.webkitdirectory = true;
-        input.accept = ".pdf";
-        input.onchange = (e) => {
-          const files = Array.from(
-            (e.target as HTMLInputElement).files || []
-          ).filter((f) => f.name.toLowerCase().endsWith(".pdf"));
-          setSelectedFiles((prev) => ({ ...prev, pdfs: files }));
-          log(`Selected ${files.length} PDF files`);
-        };
-        input.click();
-      }
+      };
+      input.click();
     } catch (err) {
       log(`Error selecting PDFs: ${err}`);
     }
@@ -426,53 +394,14 @@ function App() {
   };
 
   const exportResults = async (
-    results: Map<string, { xmlId: string; images: Blob[] }>,
-    dirHandle?: FileSystemDirectoryHandle | null
+    results: Map<string, { xmlId: string; images: Blob[] }>
   ) => {
     try {
-      if (dirHandle) {
-        const exportPromises: Promise<void>[] = [];
+      const files: Record<string, Uint8Array> = {};
+      let totalImages = 0;
 
-        for (const [, { xmlId, images }] of results) {
-          for (let i = 0; i < images.length; i++) {
-            const outputName = `${xmlId}-p${i + settings.pageStartIndex}.jpg`;
-            const promise = (async () => {
-              const fileHandle = await dirHandle.getFileHandle(outputName, {
-                create: true,
-              });
-              const writable = await fileHandle.createWritable();
-              await writable.write(images[i]);
-              await writable.close();
-            })();
-            exportPromises.push(promise);
-          }
-        }
-
-        await Promise.all(exportPromises);
-
-        log(
-          `Exported ${Array.from(results.values()).reduce(
-            (sum, r) => sum + r.images.length,
-            0
-          )} images`
-        );
-      } else if ("showDirectoryPicker" in window) {
-        const picked = await (
-          window as unknown as {
-            showDirectoryPicker: (
-              options?: unknown
-            ) => Promise<FileSystemDirectoryHandle>;
-          }
-        ).showDirectoryPicker({
-          mode: "readwrite",
-        });
-        await exportResults(results, picked);
-      } else {
-        const files: Record<string, Uint8Array> = {};
-        let totalImages = 0;
-
-        for (const [, { xmlId, images }] of results) {
-          for (let i = 0; i < images.length; i++) {
+      for (const [, { xmlId, images }] of results) {
+        for (let i = 0; i < images.length; i++) {
             const outputName = `${xmlId}-p${i + settings.pageStartIndex}.jpg`;
             const arrayBuffer = await images[i].arrayBuffer();
             files[outputName] = new Uint8Array(arrayBuffer);
@@ -489,7 +418,6 @@ function App() {
         a.click();
         URL.revokeObjectURL(url);
         log(`Downloaded zip with ${totalImages} images`);
-      }
     } catch (err) {
       log(`Export error: ${err}`, "error");
     }
@@ -514,22 +442,6 @@ function App() {
     // Clear existing toasts
     setToasts([]);
 
-    let dirHandle: FileSystemDirectoryHandle | null = exportDirHandle;
-    if ("showDirectoryPicker" in window && !dirHandle) {
-      try {
-        dirHandle = await (
-          window as unknown as {
-            showDirectoryPicker: (
-              options?: unknown
-            ) => Promise<FileSystemDirectoryHandle>;
-          }
-        ).showDirectoryPicker({ mode: "readwrite" });
-        setExportDirHandle(dirHandle);
-      } catch (err) {
-        log(`Export folder selection cancelled: ${err}`);
-        dirHandle = null;
-      }
-    }
 
     setProcessingState((prev) => ({
       ...prev,
@@ -649,7 +561,7 @@ function App() {
 
       if (results.size > 0) {
         log("Starting export...");
-        await exportResults(results, dirHandle);
+        await exportResults(results);
         log("Export complete!");
       } else {
         if (settings.useExistingNames) {
