@@ -15,7 +15,7 @@ import sys
 import logging
 from glob import glob
 import subprocess
-from rich.prompt import Prompt   # NEW
+from rich.prompt import Prompt
 
 import click
 from openpyxl import load_workbook
